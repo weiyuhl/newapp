@@ -8,13 +8,12 @@ import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import kotlinx.coroutines.*
-import org.json.JSONObject
 import kotlin.coroutines.CoroutineContext
 
 class AgentActivity : AppCompatActivity(), CoroutineScope {
 
     private lateinit var prefs: SharedPreferences
-    private var chatClient: AiChatClient? = null
+    private var providerClient: ProviderClient? = null
     private lateinit var taskEdit: EditText
     private lateinit var runBtn: Button
     private lateinit var stepsLayout: LinearLayout
@@ -27,7 +26,7 @@ class AgentActivity : AppCompatActivity(), CoroutineScope {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        prefs = getSharedPreferences(SettingsActivity.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs = getSharedPreferences("ai_chat_settings", Context.MODE_PRIVATE)
         buildUI()
         initClient()
     }
@@ -146,21 +145,20 @@ class AgentActivity : AppCompatActivity(), CoroutineScope {
     }
 
     private fun initClient() {
-        val apiUrl = prefs.getString(SettingsActivity.KEY_API_URL, SettingsActivity.DEFAULT_API_URL) ?: SettingsActivity.DEFAULT_API_URL
-        val apiKey = prefs.getString(SettingsActivity.KEY_API_KEY, SettingsActivity.DEFAULT_API_KEY) ?: SettingsActivity.DEFAULT_API_KEY
-        val model = prefs.getString(SettingsActivity.KEY_MODEL, SettingsActivity.DEFAULT_MODEL) ?: SettingsActivity.DEFAULT_MODEL
-        val maxTokens = prefs.getInt(SettingsActivity.KEY_MAX_TOKENS, SettingsActivity.DEFAULT_MAX_TOKENS)
-        val temperature = prefs.getFloat(SettingsActivity.KEY_TEMPERATURE, SettingsActivity.DEFAULT_TEMPERATURE)
+        val providerManager = ProviderManager(this)
+        val provider = providerManager.currentProvider
+        val apiKey = providerManager.apiKey
+        val baseUrl = providerManager.baseUrl
+        val model = providerManager.model
 
         try {
-            chatClient = AiChatClient(
-                apiUrl = apiUrl,
+            providerClient = ProviderClient(
+                provider = provider,
                 apiKey = apiKey.ifEmpty { "test" },
-                model = model,
-                maxTokens = maxTokens,
-                temperature = temperature
+                baseUrl = baseUrl,
+                chatPath = provider.chatPath
             )
-            addStep("system", "Agent 已就绪，等待任务...")
+            addStep("system", "Agent 已就绪 (${provider.displayName})")
         } catch (e: Exception) {
             addStep("error", "初始化失败: ${e.message}")
         }
@@ -170,7 +168,6 @@ class AgentActivity : AppCompatActivity(), CoroutineScope {
         val task = taskEdit.text.toString().trim()
         if (task.isEmpty()) return
 
-        // 清空之前的步骤
         stepsLayout.removeAllViews()
         answerText.text = "等待中..."
         runBtn.isEnabled = false
@@ -179,44 +176,165 @@ class AgentActivity : AppCompatActivity(), CoroutineScope {
         launch {
             val result = withContext(Dispatchers.IO) {
                 try {
-                    chatClient?.agentRun(task, 10) ?: "客户端未初始化"
+                    val client = providerClient ?: return@withContext "客户端未初始化"
+                    val model = prefs.getString("model", "Qwen/Qwen2.5-7B-Instruct") ?: "Qwen/Qwen2.5-7B-Instruct"
+                    runAgentLoop(client, task, model)
                 } catch (e: Exception) {
-                    "{\"success\":false,\"answer\":\"异常: ${e.message}\",\"steps\":[]}"
+                    "异常: ${e.message}"
                 }
             }
 
-            parseAndDisplayResult(result)
+            answerText.text = result
+            answerText.setBackgroundColor(0x3300FF00)
             runBtn.isEnabled = true
             progressBar.visibility = View.GONE
         }
     }
 
-    private fun parseAndDisplayResult(jsonStr: String) {
-        try {
-            val json = JSONObject(jsonStr)
-            val success = json.getBoolean("success")
-            val answer = json.getString("answer")
-            val steps = json.getJSONArray("steps")
+    private suspend fun runAgentLoop(client: ProviderClient, task: String, model: String): String {
+        val messages = mutableListOf(
+            ChatMessage(
+                role = "system",
+                content = """你是一个智能助手，可以使用工具来完成任务。
 
-            // 显示步骤
-            for (i in 0 until steps.length()) {
-                val step = steps.getJSONObject(i)
-                val type = step.getString("type")
-                val content = step.getString("content")
-                addStep(type, content)
+可用工具:
+- calculator: 执行数学计算，参数: expression (数学表达式)
+- current_time: 获取当前日期和时间，无参数
+- echo: 回显输入内容，参数: text (要回显的文本)
+
+响应格式，使用 XML 标签:
+<thought>你的思考过程</thought>
+<action>工具名称</action>
+<action_input>key=value</action_input>
+
+当你得到最终答案时，使用:
+<final_answer>你的最终答案</final_answer>
+
+规则:
+1. 每次只能调用一个工具
+2. 等待工具返回结果后再继续
+3. 如果可以直接回答用户问题，使用 final_answer"""
+            ),
+            ChatMessage(role = "user", content = "任务: $task")
+        )
+
+        val steps = mutableListOf<String>()
+        val maxIterations = 10
+
+        for (i in 0 until maxIterations) {
+            // 获取 AI 回复
+            val reply = try {
+                client.chat(messages, model, maxTokens = 512).content
+            } catch (e: Exception) {
+                return "请求失败: ${e.message}"
             }
 
-            // 显示最终答案
-            answerText.text = answer
-            if (success) {
-                answerText.setBackgroundColor(0x3300FF00)
+            messages.add(ChatMessage(role = "assistant", content = reply))
+
+            // 检查 final_answer
+            val finalAnswer = extractTag(reply, "final_answer")
+            if (finalAnswer != null) {
+                addStep("final_answer", finalAnswer)
+                steps.add("✅ $finalAnswer")
+                return finalAnswer
+            }
+
+            // 提取 thought
+            val thought = extractTag(reply, "thought")
+            if (thought != null) {
+                addStep("thought", thought)
+                steps.add("💭 $thought")
+            }
+
+            // 提取 action
+            val action = extractTag(reply, "action")
+            if (action != null) {
+                val actionInput = extractTag(reply, "action_input") ?: ""
+                addStep("action", "$action($actionInput)")
+                steps.add("🔧 $action($actionInput)")
+
+                // 执行工具
+                val toolResult = executeTool(action, actionInput)
+                addStep("observation", toolResult)
+                steps.add("👁️ $toolResult")
+
+                messages.add(ChatMessage(
+                    role = "user",
+                    content = "工具 $action 执行结果:\n$toolResult"
+                ))
             } else {
-                answerText.setBackgroundColor(0x33FF0000)
+                // 没有 action 也没有 final_answer，直接回复
+                addStep("final_answer", reply)
+                return reply
             }
-        } catch (e: Exception) {
-            answerText.text = "解析结果失败: $jsonStr"
-            answerText.setBackgroundColor(0x33FF0000)
         }
+
+        return "超过最大迭代次数 ($maxIterations)"
+    }
+
+    private fun extractTag(content: String, tag: String): String? {
+        val open = "<$tag>"
+        val close = "</$tag>"
+        val start = content.indexOf(open)
+        if (start == -1) return null
+        val end = content.indexOf(close, start + open.length)
+        if (end == -1) return null
+        return content.substring(start + open.length, end).trim()
+    }
+
+    private fun executeTool(toolName: String, args: String): String {
+        return when (toolName) {
+            "calculator" -> {
+                val expr = args.substringAfter("expression=", "").substringBefore(",").trim()
+                if (expr.isEmpty()) return "错误: 缺少 expression 参数"
+                try {
+                    val result = evalExpression(expr)
+                    "$expr = $result"
+                } catch (e: Exception) {
+                    "计算错误: ${e.message}"
+                }
+            }
+            "current_time" -> {
+                val now = System.currentTimeMillis() / 1000
+                val days = now / 86400
+                val hours = (now % 86400) / 3600
+                val mins = (now % 3600) / 60
+                val secs = now % 60
+                "Unix时间戳: $now (${days}天 ${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')} UTC)"
+            }
+            "echo" -> {
+                args.substringAfter("text=", "").trim()
+            }
+            else -> "错误: 未知工具 '$toolName'"
+        }
+    }
+
+    private fun evalExpression(expr: String): Double {
+        val e = expr.trim()
+        if (e.isEmpty()) throw IllegalArgumentException("空表达式")
+        
+        // 简单计算器
+        if (e.contains('+')) {
+            val parts = e.split('+', limit = 2)
+            return evalExpression(parts[0]) + evalExpression(parts[1])
+        }
+        if (e.contains('-') && !e.startsWith('-')) {
+            val parts = e.split('-', limit = 2)
+            if (parts[0].isNotEmpty()) {
+                return evalExpression(parts[0]) - evalExpression(parts[1])
+            }
+        }
+        if (e.contains('*')) {
+            val parts = e.split('*', limit = 2)
+            return evalExpression(parts[0]) * evalExpression(parts[1])
+        }
+        if (e.contains('/')) {
+            val parts = e.split('/', limit = 2)
+            val right = evalExpression(parts[1])
+            if (right == 0.0) throw ArithmeticException("除以零")
+            return evalExpression(parts[0]) / right
+        }
+        return e.toDoubleOrNull() ?: throw IllegalArgumentException("无法解析: $e")
     }
 
     private fun addStep(type: String, content: String) {
@@ -258,6 +376,6 @@ class AgentActivity : AppCompatActivity(), CoroutineScope {
     override fun onDestroy() {
         super.onDestroy()
         job.cancel()
-        chatClient?.close()
+        providerClient?.close()
     }
 }

@@ -41,17 +41,6 @@ class AiChatClient(
     }
 
     /**
-     * 释放 native 资源
-     */
-    override fun close() {
-        if (!isClosed) {
-            clientId?.let { nativeDestroy(it) }
-            clientId = null
-            isClosed = true
-        }
-    }
-
-    /**
      * 执行 Agent 任务
      * @param task 任务描述
      * @param maxIterations 最大迭代次数
@@ -60,6 +49,17 @@ class AiChatClient(
     fun agentRun(task: String, maxIterations: Int = 10): String {
         checkNotNull(clientId) { "Client not initialized" }
         return nativeAgentRun(clientId!!, task, maxIterations)
+    }
+
+    /**
+     * 释放 native 资源
+     */
+    override fun close() {
+        if (!isClosed) {
+            clientId?.let { nativeDestroy(it) }
+            clientId = null
+            isClosed = true
+        }
     }
 
     // ===== JNI Native Methods =====

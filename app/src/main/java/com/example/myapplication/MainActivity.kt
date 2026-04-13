@@ -16,7 +16,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope {
     private lateinit var chatLayout: LinearLayout
     private lateinit var inputEdit: EditText
     private lateinit var sendBtn: Button
-    private var chatClient: AiChatClient? = null
+    private var providerClient: ProviderClient? = null
     private var isInitialized = false
     private lateinit var prefs: SharedPreferences
     private val job = Job()
@@ -26,7 +26,7 @@ class MainActivity : AppCompatActivity(), CoroutineScope {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        prefs = getSharedPreferences(SettingsActivity.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs = getSharedPreferences("ai_chat_settings", Context.MODE_PRIVATE)
 
         // 初始化布局
         val rootLayout = LinearLayout(this).apply {
@@ -49,22 +49,10 @@ class MainActivity : AppCompatActivity(), CoroutineScope {
         }
 
         val titleText = TextView(this).apply {
-            text = "AI 聊天 (Rust Core)"
+            text = "AI 聊天"
             textSize = 20f
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-
-        val settingsBtn = Button(this).apply {
-            text = "⚙️"
-            textSize = 18f
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            setOnClickListener {
-                startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
-            }
         }
 
         val agentBtn = Button(this).apply {
@@ -77,6 +65,19 @@ class MainActivity : AppCompatActivity(), CoroutineScope {
             setPadding(8, 0, 0, 0)
             setOnClickListener {
                 startActivity(Intent(this@MainActivity, AgentActivity::class.java))
+            }
+        }
+
+        val settingsBtn = Button(this).apply {
+            text = "⚙️"
+            textSize = 18f
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setPadding(8, 0, 0, 0)
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
             }
         }
 
@@ -139,49 +140,41 @@ class MainActivity : AppCompatActivity(), CoroutineScope {
 
         setContentView(rootLayout)
 
-        // 初始化 AI 聊天客户端
-        initChatClient()
+        // 初始化聊天客户端
+        initClient()
     }
 
     override fun onResume() {
         super.onResume()
-        // 从设置页面返回时重新初始化客户端
-        initChatClient()
+        initClient()
     }
 
-    private fun initChatClient() {
-        val apiUrl = prefs.getString(SettingsActivity.KEY_API_URL, SettingsActivity.DEFAULT_API_URL) ?: SettingsActivity.DEFAULT_API_URL
-        val apiKey = prefs.getString(SettingsActivity.KEY_API_KEY, SettingsActivity.DEFAULT_API_KEY) ?: SettingsActivity.DEFAULT_API_KEY
-        val model = prefs.getString(SettingsActivity.KEY_MODEL, SettingsActivity.DEFAULT_MODEL) ?: SettingsActivity.DEFAULT_MODEL
-        val maxTokens = prefs.getInt(SettingsActivity.KEY_MAX_TOKENS, SettingsActivity.DEFAULT_MAX_TOKENS)
-        val temperature = prefs.getFloat(SettingsActivity.KEY_TEMPERATURE, SettingsActivity.DEFAULT_TEMPERATURE)
+    private fun initClient() {
+        val providerManager = ProviderManager(this)
+        val provider = providerManager.currentProvider
+        val apiKey = providerManager.apiKey
+        val baseUrl = providerManager.baseUrl
+        val model = providerManager.model
 
-        // 关闭旧客户端
-        chatClient?.close()
-        chatClient = null
+        providerClient?.close()
+        providerClient = null
 
         try {
-            System.loadLibrary("ai_chat_core")
-
-            chatClient = AiChatClient(
-                apiUrl = apiUrl,
-                apiKey = apiKey.ifEmpty { "test_key" },
-                model = model,
-                maxTokens = maxTokens,
-                temperature = temperature
+            providerClient = ProviderClient(
+                provider = provider,
+                apiKey = apiKey.ifEmpty { "test" },
+                baseUrl = baseUrl,
+                chatPath = provider.chatPath
             )
             isInitialized = true
 
             if (apiKey.isEmpty()) {
-                addMessage("system", "⚠️ 请先点击右上角 ⚙️ 配置 API Key")
+                addMessage("system", "⚠️ 请先点击右上角 ⚙️ 配置 API Key 和供应商")
             } else {
-                addMessage("system", "✅ AI 聊天已就绪 ($model)")
+                addMessage("system", "✅ ${provider.displayName} 已就绪 ($model)")
             }
-        } catch (e: UnsatisfiedLinkError) {
-            addMessage("system", "❌ Native 库加载失败: ${e.message}")
         } catch (e: Exception) {
             addMessage("system", "❌ 初始化失败: ${e.message}")
-            e.printStackTrace()
         }
     }
 
@@ -194,22 +187,24 @@ class MainActivity : AppCompatActivity(), CoroutineScope {
         sendBtn.isEnabled = false
 
         if (!isInitialized) {
-            addMessage("system", "❌ AI 客户端未初始化，请检查配置")
+            addMessage("system", "❌ 客户端未初始化")
             sendBtn.isEnabled = true
             return
         }
 
-        val apiKey = prefs.getString(SettingsActivity.KEY_API_KEY, "") ?: ""
+        val apiKey = prefs.getString("api_key", "") ?: ""
         if (apiKey.isEmpty()) {
-            addMessage("system", "❌ 请先配置 API Key（点击右上角 ⚙️）")
+            addMessage("system", "❌ 请先配置 API Key")
             sendBtn.isEnabled = true
             return
         }
+
+        val model = prefs.getString("model", "Qwen/Qwen2.5-7B-Instruct") ?: "Qwen/Qwen2.5-7B-Instruct"
 
         launch {
             val reply = withContext(Dispatchers.IO) {
                 try {
-                    chatClient?.send(message) ?: "客户端未初始化"
+                    providerClient?.sendMessage(message, model) ?: "客户端未初始化"
                 } catch (e: Exception) {
                     "发送失败: ${e.message}"
                 }
@@ -252,6 +247,6 @@ class MainActivity : AppCompatActivity(), CoroutineScope {
     override fun onDestroy() {
         super.onDestroy()
         job.cancel()
-        chatClient?.close()
+        providerClient?.close()
     }
 }
