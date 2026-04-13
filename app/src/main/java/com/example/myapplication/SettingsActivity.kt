@@ -16,14 +16,16 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var providerSpinner: Spinner
     private lateinit var baseUrlEdit: EditText
     private lateinit var apiKeyEdit: EditText
-    private lateinit var modelEdit: EditText
+    private lateinit var modelSpinner: Spinner
     private lateinit var maxTokensEdit: EditText
     private lateinit var temperatureEdit: EditText
     private lateinit var saveBtn: Button
     private lateinit var testBtn: Button
+    private lateinit var fetchModelsBtn: Button
     private lateinit var balanceText: TextView
-    private lateinit var modelsBtn: Button
+    private lateinit var statusText: TextView
     private var providerManager: ProviderManager? = null
+    private var fetchedModels: List<ModelInfo> = emptyList()
     private val scope = MainScope()
 
     companion object {
@@ -83,9 +85,13 @@ class SettingsActivity : AppCompatActivity() {
                 arrayOf("硅基流动", "OpenRouter", "DeepSeek", "OpenAI", "自定义"))
             setOnItemSelectedListener(object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                    val provider = ProviderManager(this@SettingsActivity).availableProviders[position]
+                    val provider = providerManager?.availableProviders?.getOrNull(position)
+                        ?: LLMProvider.SiliconFlow
                     baseUrlEdit.hint = provider.defaultBaseUrl.ifEmpty { "https://your-api.com" }
-                    modelEdit.hint = providerManager?.getDefaultModel(provider) ?: ""
+                    // 清空已获取的模型列表
+                    fetchedModels = emptyList()
+                    updateModelSpinner()
+                    updateFetchButton()
                 }
                 override fun onNothingSelected(parent: AdapterView<*>?) {}
             })
@@ -136,7 +142,7 @@ class SettingsActivity : AppCompatActivity() {
             rootLayout.addView(this)
         }
 
-        // 模型
+        // 模型选择
         TextView(this).apply {
             text = "模型:"
             textSize = 14f
@@ -144,12 +150,22 @@ class SettingsActivity : AppCompatActivity() {
             rootLayout.addView(this)
         }
 
-        modelEdit = EditText(this).apply {
-            hint = "Qwen/Qwen2.5-7B-Instruct"
+        modelSpinner = Spinner(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
+            rootLayout.addView(this)
+        }
+
+        // 获取模型按钮
+        fetchModelsBtn = Button(this).apply {
+            text = "🔄 一键获取模型列表"
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setOnClickListener { fetchModels() }
             rootLayout.addView(this)
         }
 
@@ -193,7 +209,7 @@ class SettingsActivity : AppCompatActivity() {
 
         // 说明
         TextView(this).apply {
-            text = "💡 硅基流动: cloud.siliconflow.cn\n💡 OpenRouter: openrouter.ai\n💡 DeepSeek: platform.deepseek.com"
+            text = "提示: 点击一键获取模型列表从服务器获取可用模型\n硅基流动: cloud.siliconflow.cn\nOpenRouter: openrouter.ai"
             textSize = 12f
             setPadding(0, 12, 0, 12)
             setTextColor(0xFF888888.toInt())
@@ -221,24 +237,15 @@ class SettingsActivity : AppCompatActivity() {
             setOnClickListener { testConnection() }
         }
 
-        modelsBtn = Button(this).apply {
-            text = "📋 模型"
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            visibility = View.GONE
-            setOnClickListener { fetchModels() }
-        }
-
         btnLayout.addView(saveBtn)
         btnLayout.addView(testBtn)
-        btnLayout.addView(modelsBtn)
         rootLayout.addView(btnLayout)
 
         // 状态文本
-        val statusText = TextView(this).apply {
+        statusText = TextView(this).apply {
             textSize = 13f
             setPadding(0, 12, 0, 0)
             gravity = Gravity.CENTER
-            id = View.generateViewId()
         }
         rootLayout.addView(statusText)
 
@@ -247,33 +254,81 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun loadSettings() {
         val provider = providerManager?.currentProvider ?: LLMProvider.SiliconFlow
-        providerSpinner.setSelection(providerManager?.availableProviders?.indexOf(provider) ?: 0)
+        val providerIndex = providerManager?.availableProviders?.indexOf(provider) ?: 0
+        providerSpinner.setSelection(providerIndex.coerceAtMost(providerManager?.availableProviders?.size?.minus(1) ?: 0))
         baseUrlEdit.setText(providerManager?.baseUrl ?: "")
         apiKeyEdit.setText(providerManager?.apiKey ?: "")
-        modelEdit.setText(providerManager?.model ?: "")
+
+        updateModelSpinner()
+        updateFetchButton()
+    }
+
+    private fun updateModelSpinner() {
+        if (fetchedModels.isEmpty()) {
+            // 显示默认模型
+            val defaultModel = providerManager?.let { pm ->
+                pm.availableProviders.getOrNull(providerSpinner.selectedItemPosition)?.let { p ->
+                    pm.getDefaultModel(p)
+                }
+            } ?: ""
+            val items = if (defaultModel.isNotEmpty()) arrayOf(defaultModel) else arrayOf("请先获取模型列表")
+            modelSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, items)
+            if (defaultModel.isNotEmpty()) {
+                modelSpinner.setSelection(0)
+            }
+        } else {
+            // 显示获取到的模型
+            val displayNames = fetchedModels.map { m ->
+                m.display_name?.takeIf { it.isNotEmpty() } ?: m.id
+            }
+            modelSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, displayNames.toTypedArray())
+
+            // 尝试选中当前保存的模型
+            val savedModel = providerManager?.model ?: ""
+            if (savedModel.isNotEmpty()) {
+                val index = fetchedModels.indexOfFirst { it.id == savedModel }
+                if (index >= 0) {
+                    modelSpinner.setSelection(index)
+                }
+            }
+        }
+    }
+
+    private fun updateFetchButton() {
+        val provider = providerManager?.availableProviders?.getOrNull(providerSpinner.selectedItemPosition)
+        fetchModelsBtn.isEnabled = true
+        fetchModelsBtn.text = "🔄 一键获取模型列表"
     }
 
     private fun saveSettings() {
         val providerIndex = providerSpinner.selectedItemPosition
-        val provider = providerManager?.availableProviders?.get(providerIndex) ?: LLMProvider.SiliconFlow
+        val provider = providerManager?.availableProviders?.getOrNull(providerIndex) ?: LLMProvider.SiliconFlow
+
+        // 获取选中的模型
+        val selectedModel = if (fetchedModels.isNotEmpty() && modelSpinner.selectedItemPosition >= 0) {
+            fetchedModels.getOrNull(modelSpinner.selectedItemPosition)?.id
+                ?: modelSpinner.selectedItem?.toString() ?: ""
+        } else {
+            modelSpinner.selectedItem?.toString() ?: ""
+        }
 
         providerManager?.currentProvider = provider
         providerManager?.baseUrl = baseUrlEdit.text.toString().trim()
         providerManager?.apiKey = apiKeyEdit.text.toString().trim()
-        providerManager?.model = modelEdit.text.toString().trim()
+        providerManager?.model = selectedModel
 
         // 保存到聊天设置
         val chatPrefs = getSharedPreferences("ai_chat_settings", Context.MODE_PRIVATE)
         chatPrefs.edit().apply {
             putString("api_url", "${providerManager?.baseUrl}${provider.chatPath}")
             putString("api_key", providerManager?.apiKey ?: "")
-            putString("model", providerManager?.model ?: "")
+            putString("model", selectedModel)
             putInt("max_tokens", maxTokensEdit.text.toString().toIntOrNull() ?: 1024)
             putFloat("temperature", temperatureEdit.text.toString().toFloatOrNull() ?: 0.7f)
             apply()
         }
 
-        Toast.makeText(this, "配置已保存", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "配置已保存 - ${provider.displayName}", Toast.LENGTH_SHORT).show()
 
         // 检查余额
         checkBalance()
@@ -282,7 +337,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun testConnection() {
         val apiKey = apiKeyEdit.text.toString().trim()
         if (apiKey.isEmpty()) {
-            showToast("请先填写 API Key", false)
+            showStatus("请先填写 API Key", false)
             return
         }
 
@@ -290,12 +345,11 @@ class SettingsActivity : AppCompatActivity() {
         testBtn.text = "⏳ 测试中..."
 
         scope.launch {
+            val provider = providerManager?.availableProviders?.getOrNull(providerSpinner.selectedItemPosition) ?: LLMProvider.SiliconFlow
             val client = ProviderClient(
-                provider = providerManager?.availableProviders?.get(providerSpinner.selectedItemPosition) ?: LLMProvider.SiliconFlow,
+                provider = provider,
                 apiKey = apiKey,
-                baseUrl = baseUrlEdit.text.toString().trim().ifEmpty {
-                    (providerManager?.availableProviders?.get(providerSpinner.selectedItemPosition) ?: LLMProvider.SiliconFlow).defaultBaseUrl
-                }
+                baseUrl = baseUrlEdit.text.toString().trim().ifEmpty { provider.defaultBaseUrl }
             )
 
             val result = withContext(Dispatchers.IO) {
@@ -304,7 +358,7 @@ class SettingsActivity : AppCompatActivity() {
             client.close()
 
             runOnUiThread {
-                showToast(result.message, result.success)
+                showStatus(result.message, result.success)
                 testBtn.isEnabled = true
                 testBtn.text = "🔍 测试"
                 if (result.success) checkBalance()
@@ -312,8 +366,54 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    private fun fetchModels() {
+        val apiKey = apiKeyEdit.text.toString().trim()
+        if (apiKey.isEmpty()) {
+            showStatus("请先填写 API Key", false)
+            return
+        }
+
+        val provider = providerManager?.availableProviders?.getOrNull(providerSpinner.selectedItemPosition) ?: LLMProvider.SiliconFlow
+        val baseUrl = baseUrlEdit.text.toString().trim().ifEmpty { provider.defaultBaseUrl }
+
+        fetchModelsBtn.isEnabled = false
+        fetchModelsBtn.text = "⏳ 获取中..."
+        showStatus("正在从 ${provider.displayName} 获取模型列表...", true)
+
+        scope.launch {
+            val client = ProviderClient(
+                provider = provider,
+                apiKey = apiKey,
+                baseUrl = baseUrl
+            )
+
+            val models = withContext(Dispatchers.IO) {
+                try {
+                    client.listModels()
+                } catch (e: Exception) {
+                    emptyList<ModelInfo>()
+                }
+            }
+            client.close()
+
+            runOnUiThread {
+                fetchedModels = models
+                updateModelSpinner()
+
+                if (models.isNotEmpty()) {
+                    showStatus("✅ 获取到 ${models.size} 个模型", true)
+                    fetchModelsBtn.text = "🔄 已获取 ${models.size} 个模型"
+                } else {
+                    showStatus("❌ 获取模型列表失败，请检查 API Key 和网络", false)
+                    fetchModelsBtn.text = "🔄 一键获取模型列表"
+                }
+                fetchModelsBtn.isEnabled = true
+            }
+        }
+    }
+
     private fun checkBalance() {
-        val provider = providerManager?.availableProviders?.get(providerSpinner.selectedItemPosition)
+        val provider = providerManager?.availableProviders?.getOrNull(providerSpinner.selectedItemPosition)
         if (provider != LLMProvider.SiliconFlow) {
             balanceText.visibility = View.GONE
             return
@@ -355,51 +455,9 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun fetchModels() {
-        val apiKey = apiKeyEdit.text.toString().trim()
-        if (apiKey.isEmpty()) {
-            showToast("请先填写 API Key", false)
-            return
-        }
-
-        modelsBtn.isEnabled = false
-        modelsBtn.text = "⏳ 获取中..."
-
-        scope.launch {
-            val provider = providerManager?.availableProviders?.get(providerSpinner.selectedItemPosition) ?: LLMProvider.SiliconFlow
-            val client = ProviderClient(
-                provider = provider,
-                apiKey = apiKey,
-                baseUrl = baseUrlEdit.text.toString().trim().ifEmpty { provider.defaultBaseUrl }
-            )
-
-            val models = withContext(Dispatchers.IO) {
-                try { client.listModels() } catch (_: Exception) { emptyList() }
-            }
-            client.close()
-
-            runOnUiThread {
-                modelsBtn.isEnabled = true
-                modelsBtn.text = "📋 模型"
-
-                if (models.isNotEmpty()) {
-                    val modelNames = models.map { it.display_name ?: it.id }.toTypedArray()
-                    AlertDialog.Builder(this@SettingsActivity)
-                        .setTitle("可用模型 (${models.size})")
-                        .setItems(modelNames) { _, which ->
-                            modelEdit.setText(models[which].id)
-                        }
-                        .setPositiveButton("关闭", null)
-                        .show()
-                } else {
-                    showToast("获取模型列表失败", false)
-                }
-            }
-        }
-    }
-
-    private fun showToast(message: String, success: Boolean) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+    private fun showStatus(message: String, success: Boolean) {
+        statusText.text = message
+        statusText.setTextColor(if (success) 0xFF00AA00.toInt() else 0xFFFF0000.toInt())
     }
 
     override fun onDestroy() {
