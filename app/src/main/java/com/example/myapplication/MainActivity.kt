@@ -67,7 +67,21 @@ class MainActivity : AppCompatActivity(), CoroutineScope {
             }
         }
 
+        val agentBtn = Button(this).apply {
+            text = "🤖"
+            textSize = 18f
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setPadding(8, 0, 0, 0)
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, AgentActivity::class.java))
+            }
+        }
+
         titleLayout.addView(titleText)
+        titleLayout.addView(agentBtn)
         titleLayout.addView(settingsBtn)
         rootLayout.addView(titleLayout)
         val separator = View(this)

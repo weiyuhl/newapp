@@ -26,6 +26,10 @@
             android:name=".SettingsActivity"
             android:label="AI 配置"
             android:exported="false" />
+        <activity
+            android:name=".AgentActivity"
+            android:label="AI Agent"
+            android:exported="false" />
     </application>
 
 </manifest>

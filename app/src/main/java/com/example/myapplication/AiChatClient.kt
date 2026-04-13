@@ -51,6 +51,17 @@ class AiChatClient(
         }
     }
 
+    /**
+     * 执行 Agent 任务
+     * @param task 任务描述
+     * @param maxIterations 最大迭代次数
+     * @return JSON 格式的结果
+     */
+    fun agentRun(task: String, maxIterations: Int = 10): String {
+        checkNotNull(clientId) { "Client not initialized" }
+        return nativeAgentRun(clientId!!, task, maxIterations)
+    }
+
     // ===== JNI Native Methods =====
 
     private external fun nativeCreate(
@@ -69,4 +80,10 @@ class AiChatClient(
     private external fun nativeClearHistory(clientId: String)
 
     private external fun nativeDestroy(clientId: String)
+
+    private external fun nativeAgentRun(
+        clientId: String,
+        task: String,
+        maxIterations: Int
+    ): String
 }
