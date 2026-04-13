@@ -136,7 +136,7 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         // 余额显示区域
-        val balanceLayout = LinearLayout(this).apply {
+        balanceLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
