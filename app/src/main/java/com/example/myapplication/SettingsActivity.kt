@@ -9,6 +9,7 @@ import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import kotlinx.coroutines.*
+import kotlinx.serialization.json.*
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -23,6 +24,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var testBtn: Button
     private lateinit var fetchModelsBtn: Button
     private lateinit var balanceText: TextView
+    private lateinit var balanceLayout: LinearLayout
     private lateinit var statusText: TextView
     private var providerManager: ProviderManager? = null
     private var fetchedModels: List<ModelInfo> = emptyList()
@@ -133,12 +135,44 @@ class SettingsActivity : AppCompatActivity() {
             rootLayout.addView(this)
         }
 
-        // 余额显示（仅硅基流动）
+        // 余额显示区域
+        val balanceLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setPadding(8, 8, 8, 8)
+            setBackgroundColor(0x10000000)
+            visibility = View.GONE
+            rootLayout.addView(this)
+        }
+
+        // 余额标题
+        TextView(this).apply {
+            text = "账户余额"
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setPadding(0, 4, 0, 4)
+            balanceLayout.addView(this)
+        }
+
+        // 余额详细信息
         balanceText = TextView(this).apply {
             textSize = 13f
-            setPadding(8, 8, 8, 8)
             gravity = Gravity.CENTER
-            visibility = View.GONE
+            setPadding(4, 4, 4, 4)
+            balanceLayout.addView(this)
+        }
+
+        // 余额查询按钮
+        val balanceBtn = Button(this).apply {
+            text = "💰 查询余额"
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setOnClickListener { queryBalance() }
             rootLayout.addView(this)
         }
 
@@ -241,6 +275,8 @@ class SettingsActivity : AppCompatActivity() {
         btnLayout.addView(testBtn)
         rootLayout.addView(btnLayout)
 
+        // 余额查询按钮已添加到上方
+
         // 状态文本
         statusText = TextView(this).apply {
             textSize = 13f
@@ -261,6 +297,10 @@ class SettingsActivity : AppCompatActivity() {
 
         updateModelSpinner()
         updateFetchButton()
+        
+        // 根据供应商显示余额按钮
+        val showBalance = provider == LLMProvider.SiliconFlow || provider == LLMProvider.OpenRouter
+        balanceLayout.visibility = if (showBalance) View.VISIBLE else View.GONE
     }
 
     private fun updateModelSpinner() {
@@ -331,7 +371,9 @@ class SettingsActivity : AppCompatActivity() {
         Toast.makeText(this, "配置已保存 - ${provider.displayName}", Toast.LENGTH_SHORT).show()
 
         // 检查余额
-        checkBalance()
+        if (provider == LLMProvider.SiliconFlow || provider == LLMProvider.OpenRouter) {
+            queryBalance()
+        }
     }
 
     private fun testConnection() {
@@ -361,7 +403,12 @@ class SettingsActivity : AppCompatActivity() {
                 showStatus(result.message, result.success)
                 testBtn.isEnabled = true
                 testBtn.text = "🔍 测试"
-                if (result.success) checkBalance()
+                if (result.success) {
+                    val provider = providerManager?.availableProviders?.getOrNull(providerSpinner.selectedItemPosition)
+                    if (provider == LLMProvider.SiliconFlow || provider == LLMProvider.OpenRouter) {
+                        queryBalance()
+                    }
+                }
             }
         }
     }
@@ -373,86 +420,166 @@ class SettingsActivity : AppCompatActivity() {
             return
         }
 
-        val provider = providerManager?.availableProviders?.getOrNull(providerSpinner.selectedItemPosition) ?: LLMProvider.SiliconFlow
+        val providerIndex = providerSpinner.selectedItemPosition
+        val provider = providerManager?.availableProviders?.getOrNull(providerIndex) ?: LLMProvider.SiliconFlow
         val baseUrl = baseUrlEdit.text.toString().trim().ifEmpty { provider.defaultBaseUrl }
 
         fetchModelsBtn.isEnabled = false
-        fetchModelsBtn.text = "⏳ 获取中..."
+        fetchModelsBtn.text = "获取中..."
         showStatus("正在从 ${provider.displayName} 获取模型列表...", true)
 
         scope.launch {
-            val client = ProviderClient(
-                provider = provider,
-                apiKey = apiKey,
-                baseUrl = baseUrl
-            )
+            var models: List<ModelInfo> = emptyList()
+            var errorMsg = ""
 
-            val models = withContext(Dispatchers.IO) {
-                try {
-                    client.listModels()
-                } catch (e: Exception) {
-                    emptyList<ModelInfo>()
-                }
+            val client = try {
+                ProviderClient(
+                    provider = provider,
+                    apiKey = apiKey,
+                    baseUrl = baseUrl
+                )
+            } catch (e: Exception) {
+                errorMsg = "创建客户端失败: ${e.message}"
+                android.util.Log.e("FetchModels", "create client error", e)
+                null
             }
-            client.close()
 
-            runOnUiThread {
-                fetchedModels = models
-                updateModelSpinner()
-
-                if (models.isNotEmpty()) {
-                    showStatus("✅ 获取到 ${models.size} 个模型", true)
-                    fetchModelsBtn.text = "🔄 已获取 ${models.size} 个模型"
-                } else {
-                    showStatus("❌ 获取模型列表失败，请检查 API Key 和网络", false)
-                    fetchModelsBtn.text = "🔄 一键获取模型列表"
+            if (client != null) {
+                try {
+                    models = client.listModels()
+                    android.util.Log.d("FetchModels", "Got ${models.size} models")
+                } catch (e: Exception) {
+                    errorMsg = e.message ?: "未知错误"
+                    android.util.Log.e("FetchModels", "listModels error: $errorMsg", e)
                 }
-                fetchModelsBtn.isEnabled = true
+                try { client.close() } catch (_: Exception) {}
+            }
+
+            fetchedModels = models
+            updateModelSpinner()
+
+            if (models.isNotEmpty()) {
+                showStatus("获取到 ${models.size} 个模型", true)
+                fetchModelsBtn.text = "已获取 ${models.size} 个模型 (点击刷新)"
+            } else {
+                showStatus("获取失败: ${errorMsg.ifEmpty { "请检查 API Key 和网络" }}", false)
+                fetchModelsBtn.text = "一键获取模型列表"
+            }
+            fetchModelsBtn.isEnabled = true
+        }
+    }
+
+    private fun queryBalance() {
+        val apiKey = apiKeyEdit.text.toString().trim()
+        if (apiKey.isEmpty()) {
+            showStatus("请先填写 API Key", false)
+            return
+        }
+
+        val provider = providerManager?.availableProviders?.getOrNull(providerSpinner.selectedItemPosition)
+        if (provider != LLMProvider.SiliconFlow && provider != LLMProvider.OpenRouter) {
+            showStatus("${provider?.displayName} 不支持余额查询", false)
+            return
+        }
+
+        val baseUrl = baseUrlEdit.text.toString().trim().ifEmpty { provider.defaultBaseUrl }
+        
+        balanceLayout.visibility = View.VISIBLE
+        balanceText.text = "查询中..."
+        balanceText.setTextColor(0xFF888888.toInt())
+
+        scope.launch {
+            val client = try {
+                ProviderClient(
+                    provider = provider,
+                    apiKey = apiKey,
+                    baseUrl = baseUrl
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("Balance", "create client error", e)
+                withContext(Dispatchers.Main) {
+                    balanceText.text = "创建客户端失败: ${e.message}"
+                    balanceText.setTextColor(0xFFFF0000.toInt())
+                }
+                return@launch
+            }
+
+            var balanceInfo: String = ""
+            var isSuccess = false
+
+            try {
+                when (provider) {
+                    LLMProvider.SiliconFlow -> {
+                        val balance = withContext(Dispatchers.IO) {
+                            client.getBalance()
+                        }
+                        if (balance != null) {
+                            val detail = balance.balances.firstOrNull()
+                            balanceInfo = if (detail != null) {
+                                "总余额: ¥${detail.total_balance}\n" +
+                                "赠送余额: ¥${detail.granted_balance}\n" +
+                                "充值余额: ¥${detail.topped_up_balance}\n" +
+                                "状态: ${if (balance.is_available) "可用" else "不可用"}"
+                            } else {
+                                "未获取到余额信息"
+                            }
+                        } else {
+                            balanceInfo = "查询失败"
+                        }
+                    }
+                    LLMProvider.OpenRouter -> {
+                        val keyInfo = withContext(Dispatchers.IO) {
+                            client.getKeyInfo()
+                        }
+                        if (keyInfo != null) {
+                            val root = try {
+                                kotlinx.serialization.json.Json.parseToJsonElement(keyInfo)
+                            } catch (e: Exception) { null }
+                            
+                            val data = root?.jsonObject?.get("data")?.jsonObject
+                            if (data != null) {
+                                val usage = data["usage"]?.jsonPrimitive?.doubleOrNull ?: 0.0
+                                val limit = data["limit"]?.jsonPrimitive?.doubleOrNull ?: 0.0
+                                val limitRemaining = data["limit_remaining"]?.jsonPrimitive?.doubleOrNull ?: 0.0
+                                val isFreeTier = data["is_free_tier"]?.jsonPrimitive?.booleanOrNull ?: false
+                                
+                                balanceInfo = "已使用: $${String.format("%.2f", usage)}\n" +
+                                    "总额度: $${String.format("%.2f", limit)}\n" +
+                                    "剩余额度: $${String.format("%.2f", limitRemaining)}\n" +
+                                    "免费用户: ${if (isFreeTier) "是" else "否"}"
+                                android.util.Log.d("Balance", "OpenRouter balance: $balanceInfo")
+                            } else {
+                                balanceInfo = "未获取到密钥信息"
+                            }
+                        } else {
+                            balanceInfo = "查询失败"
+                        }
+                    }
+                    else -> {
+                        balanceInfo = "不支持此供应商的余额查询"
+                    }
+                }
+                isSuccess = true
+            } catch (e: Exception) {
+                android.util.Log.e("Balance", "query error", e)
+                balanceInfo = "查询失败: ${e.message}"
+                isSuccess = false
+            } finally {
+                try { client.close() } catch (_: Exception) {}
+            }
+
+            withContext(Dispatchers.Main) {
+                balanceText.text = balanceInfo
+                balanceText.setTextColor(if (isSuccess) 0xFF00AA00.toInt() else 0xFFFF0000.toInt())
+                showStatus(if (isSuccess) "余额查询成功" else "余额查询失败", isSuccess)
             }
         }
     }
 
     private fun checkBalance() {
-        val provider = providerManager?.availableProviders?.getOrNull(providerSpinner.selectedItemPosition)
-        if (provider != LLMProvider.SiliconFlow) {
-            balanceText.visibility = View.GONE
-            return
-        }
-
-        val apiKey = apiKeyEdit.text.toString().trim()
-        if (apiKey.isEmpty()) return
-
-        balanceText.visibility = View.VISIBLE
-        balanceText.text = "⏳ 正在查询余额..."
-        balanceText.setTextColor(0xFF888888.toInt())
-
-        scope.launch {
-            val client = ProviderClient(
-                provider = provider,
-                apiKey = apiKey,
-                baseUrl = baseUrlEdit.text.toString().trim().ifEmpty { provider.defaultBaseUrl }
-            )
-
-            val balance = withContext(Dispatchers.IO) {
-                try { client.getBalance() } catch (_: Exception) { null }
-            }
-            client.close()
-
-            runOnUiThread {
-                if (balance != null) {
-                    val detail = balance.balances.firstOrNull()
-                    balanceText.text = if (detail != null) {
-                        "💰 余额: ¥${detail.total_balance} (赠送: ¥${detail.granted_balance}, 充值: ¥${detail.topped_up_balance})"
-                    } else {
-                        "💰 余额查询失败"
-                    }
-                    balanceText.setTextColor(if (balance.is_available) 0xFF00AA00.toInt() else 0xFFFF0000.toInt())
-                } else {
-                    balanceText.text = "💰 余额查询失败"
-                    balanceText.setTextColor(0xFFFF0000.toInt())
-                }
-            }
-        }
+        // 此方法已废弃，使用 queryBalance 替代
+        // 保留此方法仅为兼容性
+        Toast.makeText(this, "请使用余额查询按钮", Toast.LENGTH_SHORT).show()
     }
 
     private fun showStatus(message: String, success: Boolean) {

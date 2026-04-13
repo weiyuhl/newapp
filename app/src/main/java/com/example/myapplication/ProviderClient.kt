@@ -241,29 +241,66 @@ class ProviderClient(
             .get()
             .build()
 
-        val response = httpClient.newCall(request).execute()
-        if (!response.isSuccessful) {
-            throw ChatException("获取模型列表失败: ${response.code}")
+        val response = try {
+            httpClient.newCall(request).execute()
+        } catch (e: java.net.UnknownHostException) {
+            throw ChatException("无法连接到服务器，请检查网络")
+        } catch (e: java.net.SocketTimeoutException) {
+            throw ChatException("请求超时，请稍后重试")
+        } catch (e: java.io.IOException) {
+            throw ChatException("网络错误: ${e.message}")
         }
 
-        val body = response.body?.string() ?: return@withContext emptyList<ModelInfo>()
-        val root = json.parseToJsonElement(body).jsonObject
-        val dataArray = root["data"]?.jsonArray ?: return@withContext emptyList()
+        if (!response.isSuccessful) {
+            val errBody = response.body?.string() ?: ""
+            response.close()
+            throw ChatException("获取模型列表失败 (${response.code}): $errBody")
+        }
 
-        dataArray.map {
-            val obj = it.jsonObject
-            ModelInfo(
-                id = obj["id"]?.jsonPrimitive?.contentOrNull ?: "",
-                object_type = obj["object"]?.jsonPrimitive?.contentOrNull ?: "model",
-                owned_by = obj["owned_by"]?.jsonPrimitive?.contentOrNull ?: "",
-                display_name = obj["name"]?.jsonPrimitive?.contentOrNull
-                    ?: obj["display_name"]?.jsonPrimitive?.contentOrNull,
-                context_length = obj["context_length"]?.jsonPrimitive?.intOrNull
-                    ?: obj["context_window"]?.jsonPrimitive?.intOrNull,
-                max_output_tokens = obj["max_output_tokens"]?.jsonPrimitive?.intOrNull
-                    ?: obj["max_tokens"]?.jsonPrimitive?.intOrNull,
-                description = obj["description"]?.jsonPrimitive?.contentOrNull
-            )
+        val body = response.body?.string()
+        response.close()
+
+        if (body.isNullOrEmpty()) return@withContext emptyList()
+
+        // 检查是否是非 JSON 响应
+        if (!body.trimStart().startsWith("{") && !body.trimStart().startsWith("[")) {
+            throw ChatException("服务器返回非 JSON 响应: ${body.take(100)}")
+        }
+
+        val root = try {
+            json.parseToJsonElement(body)
+        } catch (e: Exception) {
+            throw ChatException("解析 JSON 失败: ${e.message}")
+        }
+
+        val rootObj = root.jsonObject
+        val dataArray = rootObj["data"]?.jsonArray ?: run {
+            val errMsg = rootObj["message"]?.jsonPrimitive?.contentOrNull
+                ?: rootObj["error"]?.jsonPrimitive?.contentOrNull
+            if (errMsg != null) {
+                throw ChatException("API 错误: $errMsg")
+            }
+            return@withContext emptyList()
+        }
+
+        dataArray.mapNotNull { elem ->
+            try {
+                val obj = elem.jsonObject
+                ModelInfo(
+                    id = obj["id"]?.jsonPrimitive?.contentOrNull ?: "",
+                    object_type = obj["object"]?.jsonPrimitive?.contentOrNull ?: "model",
+                    owned_by = obj["owned_by"]?.jsonPrimitive?.contentOrNull ?: "",
+                    display_name = obj["name"]?.jsonPrimitive?.contentOrNull
+                        ?: obj["display_name"]?.jsonPrimitive?.contentOrNull,
+                    context_length = obj["context_length"]?.jsonPrimitive?.intOrNull
+                        ?: obj["context_window"]?.jsonPrimitive?.intOrNull,
+                    max_output_tokens = obj["max_output_tokens"]?.jsonPrimitive?.intOrNull
+                        ?: obj["max_tokens"]?.jsonPrimitive?.intOrNull,
+                    description = obj["description"]?.jsonPrimitive?.contentOrNull
+                )
+            } catch (_: Exception) {
+                null
+            }
         }
     }
 
