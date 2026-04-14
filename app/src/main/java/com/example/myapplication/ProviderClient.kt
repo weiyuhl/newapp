@@ -138,16 +138,23 @@ enum class LLMProvider(
     val modelsPath: String = "/v1/models"
 
     /**
-     * 获取默认 API 地址（与 lib.rs 的 providers.rs 保持一致）
-     * 不硬编码模型，用户应通过"一键获取模型列表"选择
+     * 获取默认 API 地址
+     * 地址定义在 lib.rs 的 providers.rs 中，通过 nativeGetProviderBaseUrl() 获取
      */
     val defaultBaseUrl: String
-        get() = when (this) {
-            SiliconFlow -> "https://api.siliconflow.cn"
-            OpenRouter -> "https://openrouter.ai/api"
-            DeepSeek -> "https://api.deepseek.com"
-            Custom -> ""
+        get() = nativeGetProviderBaseUrl(this.name)
+
+    companion object {
+        init {
+            System.loadLibrary("ai_chat_core")
         }
+        
+        /**
+         * 从 lib.rs 获取供应商 API 地址
+         */
+        @JvmStatic
+        external fun nativeGetProviderBaseUrl(providerName: String): String
+    }
 }
 
 // ===== 统一供应商客户端 =====
