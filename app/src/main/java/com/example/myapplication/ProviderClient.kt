@@ -124,6 +124,27 @@ data class SiliconFlowUserData(
     val totalBalance: String = "0"
 )
 
+// ===== DeepSeek 专属数据模型 =====
+
+@Serializable
+data class DeepSeekBalanceResponse(
+    @kotlinx.serialization.SerialName("is_available")
+    val isAvailable: Boolean = false,
+    @kotlinx.serialization.SerialName("balance_infos")
+    val balanceInfos: List<DeepSeekBalanceItem> = emptyList()
+)
+
+@Serializable
+data class DeepSeekBalanceItem(
+    val currency: String = "",
+    @kotlinx.serialization.SerialName("total_balance")
+    val totalBalance: String = "0",
+    @kotlinx.serialization.SerialName("granted_balance")
+    val grantedBalance: String = "0",
+    @kotlinx.serialization.SerialName("topped_up_balance")
+    val toppedUpBalance: String = "0"
+)
+
 // ===== 供应商枚举 =====
 
 enum class LLMProvider(
@@ -338,11 +359,23 @@ class ProviderClient(
      * 硅基流动：查询余额
      */
     suspend fun getBalance(): BalanceInfo? {
-        if (provider != LLMProvider.SiliconFlow) return null
+        if (provider != LLMProvider.SiliconFlow && provider != LLMProvider.DeepSeek) return null
 
         return withContext(Dispatchers.IO) {
             val request = Request.Builder()
-                .url("$baseUrl/v1/user/info")
+                .url(
+                    if (provider == LLMProvider.SiliconFlow) {
+                        "$baseUrl/v1/user/info"
+                    } else {
+                        // DeepSeek 余额查询: GET /user/balance
+                        val base = if (baseUrl.contains("/v1/")) {
+                            baseUrl.substringBefore("/v1/")
+                        } else {
+                            baseUrl
+                        }
+                        "$base/user/balance"
+                    }
+                )
                 .addHeader("Authorization", "Bearer $apiKey")
                 .addHeader("Accept", "application/json")
                 .get()
@@ -352,21 +385,39 @@ class ProviderClient(
             if (!response.isSuccessful) return@withContext null
 
             val body = response.body?.string() ?: return@withContext null
-            val userInfo = json.decodeFromString<SiliconFlowUserInfo>(body)
-            val data = userInfo.data ?: return@withContext null
 
-            val totalBalance = data.totalBalance.toDoubleOrNull() ?: 0.0
-            BalanceInfo(
-                is_available = totalBalance > 0,
-                balances = listOf(
-                    BalanceDetail(
-                        currency = "CNY",
-                        total_balance = data.totalBalance,
-                        granted_balance = data.balance,
-                        topped_up_balance = data.chargeBalance
+            if (provider == LLMProvider.SiliconFlow) {
+                // 硅基流动响应格式
+                val userInfo = json.decodeFromString<SiliconFlowUserInfo>(body)
+                val data = userInfo.data ?: return@withContext null
+
+                val totalBalance = data.totalBalance.toDoubleOrNull() ?: 0.0
+                BalanceInfo(
+                    is_available = totalBalance > 0,
+                    balances = listOf(
+                        BalanceDetail(
+                            currency = "CNY",
+                            total_balance = data.totalBalance,
+                            granted_balance = data.balance,
+                            topped_up_balance = data.chargeBalance
+                        )
                     )
                 )
-            )
+            } else {
+                // DeepSeek 响应格式
+                val result = json.decodeFromString<DeepSeekBalanceResponse>(body)
+                BalanceInfo(
+                    is_available = result.isAvailable,
+                    balances = result.balanceInfos.map {
+                        BalanceDetail(
+                            currency = it.currency,
+                            total_balance = it.totalBalance,
+                            granted_balance = it.grantedBalance,
+                            topped_up_balance = it.toppedUpBalance
+                        )
+                    }
+                )
+            }
         }
     }
 

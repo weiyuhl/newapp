@@ -319,7 +319,7 @@ class SettingsActivity : AppCompatActivity() {
         updateFetchButton()
         
         // 根据供应商显示余额按钮
-        val showBalance = provider == LLMProvider.SiliconFlow || provider == LLMProvider.OpenRouter
+        val showBalance = provider == LLMProvider.SiliconFlow || provider == LLMProvider.OpenRouter || provider == LLMProvider.DeepSeek
         balanceLayout.visibility = if (showBalance) View.VISIBLE else View.GONE
     }
 
@@ -396,7 +396,7 @@ class SettingsActivity : AppCompatActivity() {
         Toast.makeText(this, "配置已保存 - ${provider.displayName}", Toast.LENGTH_SHORT).show()
 
         // 检查余额
-        if (provider == LLMProvider.SiliconFlow || provider == LLMProvider.OpenRouter) {
+        if (provider == LLMProvider.SiliconFlow || provider == LLMProvider.OpenRouter || provider == LLMProvider.DeepSeek) {
             queryBalance()
         }
     }
@@ -430,7 +430,7 @@ class SettingsActivity : AppCompatActivity() {
                 testBtn.text = "🔍 测试"
                 if (result.success) {
                     val provider = providerManager?.availableProviders?.getOrNull(providerSpinner.selectedItemPosition)
-                    if (provider == LLMProvider.SiliconFlow || provider == LLMProvider.OpenRouter) {
+                    if (provider == LLMProvider.SiliconFlow || provider == LLMProvider.OpenRouter || provider == LLMProvider.DeepSeek) {
                         queryBalance()
                     }
                 }
@@ -502,7 +502,7 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         val provider = providerManager?.availableProviders?.getOrNull(providerSpinner.selectedItemPosition)
-        if (provider != LLMProvider.SiliconFlow && provider != LLMProvider.OpenRouter) {
+        if (provider != LLMProvider.SiliconFlow && provider != LLMProvider.OpenRouter && provider != LLMProvider.DeepSeek) {
             showStatus("${provider?.displayName} 不支持余额查询", false)
             return
         }
@@ -560,21 +560,40 @@ class SettingsActivity : AppCompatActivity() {
                             val root = try {
                                 kotlinx.serialization.json.Json.parseToJsonElement(keyInfo)
                             } catch (e: Exception) { null }
-                            
+
                             val data = root?.jsonObject?.get("data")?.jsonObject
                             if (data != null) {
                                 val usage = data["usage"]?.jsonPrimitive?.doubleOrNull ?: 0.0
                                 val limit = data["limit"]?.jsonPrimitive?.doubleOrNull ?: 0.0
                                 val limitRemaining = data["limit_remaining"]?.jsonPrimitive?.doubleOrNull ?: 0.0
                                 val isFreeTier = data["is_free_tier"]?.jsonPrimitive?.booleanOrNull ?: false
-                                
+
                                 balanceInfo = "已使用: $${String.format("%.2f", usage)}\n" +
                                     "总额度: $${String.format("%.2f", limit)}\n" +
                                     "剩余额度: $${String.format("%.2f", limitRemaining)}\n" +
                                     "免费用户: ${if (isFreeTier) "是" else "否"}"
-                                
+
                             } else {
                                 balanceInfo = "未获取到密钥信息"
+                            }
+                        } else {
+                            balanceInfo = "查询失败"
+                        }
+                    }
+                    LLMProvider.DeepSeek -> {
+                        val balance = withContext(Dispatchers.IO) {
+                            client.getBalance()
+                        }
+                        if (balance != null) {
+                            val detail = balance.balances.firstOrNull()
+                            balanceInfo = if (detail != null) {
+                                "货币: ${detail.currency}\n" +
+                                "总余额: ${detail.total_balance}\n" +
+                                "赠送余额: ${detail.granted_balance}\n" +
+                                "充值余额: ${detail.topped_up_balance}\n" +
+                                "状态: ${if (balance.is_available) "可用" else "不可用"}"
+                            } else {
+                                "未获取到余额信息"
                             }
                         } else {
                             balanceInfo = "查询失败"

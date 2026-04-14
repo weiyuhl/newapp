@@ -68,6 +68,12 @@ class AiChatClient(
      */
     external fun nativeGetDefaultConfig(): String
 
+    /**
+     * 查询账户余额（从 Rust lib.rs）
+     * @return JSON 字符串，包含 is_available, balances 等信息
+     */
+    external fun nativeGetBalance(clientId: String): String
+
     companion object {
         init {
             System.loadLibrary("ai_chat_core")
