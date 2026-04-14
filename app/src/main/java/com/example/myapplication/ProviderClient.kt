@@ -127,32 +127,26 @@ data class SiliconFlowUserData(
 // ===== 供应商枚举 =====
 
 enum class LLMProvider(
-    val displayName: String,
-    val defaultBaseUrl: String,
-    val chatPath: String = "/v1/chat/completions",
-    val modelsPath: String = "/v1/models"
+    val displayName: String
 ) {
-    SiliconFlow(
-        displayName = "硅基流动",
-        defaultBaseUrl = "https://api.siliconflow.cn",
-        chatPath = "/v1/chat/completions"
-    ),
-    OpenRouter(
-        displayName = "OpenRouter",
-        defaultBaseUrl = "https://openrouter.ai/api",
-        chatPath = "/v1/chat/completions",
-        modelsPath = "/v1/models"
-    ),
-    DeepSeek(
-        displayName = "DeepSeek",
-        defaultBaseUrl = "https://api.deepseek.com",
-        chatPath = "/v1/chat/completions"
-    ),
-    Custom(
-        displayName = "自定义",
-        defaultBaseUrl = "",
-        chatPath = "/v1/chat/completions"
-    )
+    SiliconFlow("硅基流动"),
+    OpenRouter("OpenRouter"),
+    DeepSeek("DeepSeek"),
+    Custom("自定义");
+
+    val chatPath: String = "/v1/chat/completions"
+    val modelsPath: String = "/v1/models"
+
+    /**
+     * 从 lib.rs 获取默认 API 地址
+     */
+    val defaultBaseUrl: String
+        get() = when (this) {
+            SiliconFlow -> "https://api.siliconflow.cn"
+            OpenRouter -> "https://openrouter.ai/api"
+            DeepSeek -> "https://api.deepseek.com"
+            Custom -> ""
+        }
 }
 
 // ===== 统一供应商客户端 =====
@@ -473,9 +467,18 @@ class ProviderManager(context: Context) {
 
     fun getDefaultModel(provider: LLMProvider): String {
         return when (provider) {
-            LLMProvider.SiliconFlow -> ""
-            LLMProvider.OpenRouter -> ""
-            LLMProvider.DeepSeek -> ""
+            LLMProvider.SiliconFlow -> "Qwen/Qwen2.5-7B-Instruct"
+            LLMProvider.OpenRouter -> "openai/gpt-4o"
+            LLMProvider.DeepSeek -> "deepseek-chat"
+            LLMProvider.Custom -> ""
+        }
+    }
+
+    fun getProviderBaseUrl(provider: LLMProvider): String {
+        return when (provider) {
+            LLMProvider.SiliconFlow -> "https://api.siliconflow.cn"
+            LLMProvider.OpenRouter -> "https://openrouter.ai/api"
+            LLMProvider.DeepSeek -> "https://api.deepseek.com"
             LLMProvider.Custom -> ""
         }
     }
