@@ -138,7 +138,8 @@ enum class LLMProvider(
     val modelsPath: String = "/v1/models"
 
     /**
-     * 从 lib.rs 获取默认 API 地址
+     * 获取默认 API 地址（与 lib.rs 的 providers.rs 保持一致）
+     * 不硬编码模型，用户应通过"一键获取模型列表"选择
      */
     val defaultBaseUrl: String
         get() = when (this) {
@@ -466,15 +467,12 @@ class ProviderManager(context: Context) {
         set(value) = prefs.edit().putString(KEY_MODEL, value).apply()
 
     fun getDefaultModel(provider: LLMProvider): String {
-        return when (provider) {
-            LLMProvider.SiliconFlow -> "Qwen/Qwen2.5-7B-Instruct"
-            LLMProvider.OpenRouter -> "openai/gpt-4o"
-            LLMProvider.DeepSeek -> "deepseek-chat"
-            LLMProvider.Custom -> ""
-        }
+        // 不硬编码，用户应通过"一键获取模型列表"来选择模型
+        return ""
     }
 
     fun getProviderBaseUrl(provider: LLMProvider): String {
+        // 从 lib.rs 获取，保持与 Rust 端一致
         return when (provider) {
             LLMProvider.SiliconFlow -> "https://api.siliconflow.cn"
             LLMProvider.OpenRouter -> "https://openrouter.ai/api"
