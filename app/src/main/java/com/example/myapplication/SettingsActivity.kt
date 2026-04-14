@@ -89,7 +89,7 @@ class SettingsActivity : AppCompatActivity() {
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                     val provider = providerManager?.availableProviders?.getOrNull(position)
                         ?: LLMProvider.SiliconFlow
-                    baseUrlEdit.hint = provider.defaultBaseUrl
+                    baseUrlEdit.hint = ProviderManager.getProviderConfig().getBaseUrl(provider.name)
                     // 清空已获取的模型列表
                     fetchedModels = emptyList()
                     updateModelSpinner()
@@ -109,7 +109,7 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         baseUrlEdit = EditText(this).apply {
-            hint = LLMProvider.SiliconFlow.defaultBaseUrl
+            hint = ProviderManager.getProviderConfig().getBaseUrl("SiliconFlow")
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -396,7 +396,7 @@ class SettingsActivity : AppCompatActivity() {
             val client = ProviderClient(
                 provider = provider,
                 apiKey = apiKey,
-                baseUrl = baseUrlEdit.text.toString().trim().ifEmpty { provider.defaultBaseUrl }
+                baseUrl = baseUrlEdit.text.toString().trim().ifEmpty { ProviderManager.getProviderConfig().getBaseUrl(provider.name) }
             )
 
             val result = withContext(Dispatchers.IO) {
@@ -427,7 +427,7 @@ class SettingsActivity : AppCompatActivity() {
 
         val providerIndex = providerSpinner.selectedItemPosition
         val provider = providerManager?.availableProviders?.getOrNull(providerIndex) ?: LLMProvider.SiliconFlow
-        val baseUrl = baseUrlEdit.text.toString().trim().ifEmpty { provider.defaultBaseUrl }
+        val baseUrl = baseUrlEdit.text.toString().trim().ifEmpty { ProviderManager.getProviderConfig().getBaseUrl(provider.name) }
 
         fetchModelsBtn.isEnabled = false
         fetchModelsBtn.text = "获取中..."
@@ -487,7 +487,7 @@ class SettingsActivity : AppCompatActivity() {
             return
         }
 
-        val baseUrl = baseUrlEdit.text.toString().trim().ifEmpty { provider.defaultBaseUrl }
+        val baseUrl = baseUrlEdit.text.toString().trim().ifEmpty { ProviderManager.getProviderConfig().getBaseUrl(provider.name) }
         
         balanceLayout.visibility = View.VISIBLE
         balanceText.text = "查询中..."

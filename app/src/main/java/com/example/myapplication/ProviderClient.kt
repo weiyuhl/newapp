@@ -129,6 +129,10 @@ data class SiliconFlowUserData(
 enum class LLMProvider(
     val displayName: String
 ) {
+    /**
+     * API 地址从 lib.rs 的 providers.rs 通过 JNI 获取
+     * 严禁在此处硬编码 API 地址！
+     */
     SiliconFlow("硅基流动"),
     OpenRouter("OpenRouter"),
     DeepSeek("DeepSeek"),
@@ -136,24 +140,50 @@ enum class LLMProvider(
 
     val chatPath: String = "/v1/chat/completions"
     val modelsPath: String = "/v1/models"
+}
+
+/**
+ * 从 lib.rs 获取的供应商配置
+ */
+data class ProviderConfig(
+    val providers: List<String>,
+    val providerUrls: Map<String, String>
+) {
+    companion object {
+        /**
+         * 从 lib.rs 获取供应商配置（缓存结果）
+         */
+        fun load(): ProviderConfig {
+            return try {
+                val client = AiChatClient("", "", "", 0, 0f)
+                val json = client.nativeGetDefaultConfig()
+                client.close()
+                val root = kotlinx.serialization.json.Json.parseToJsonElement(json)
+                    .jsonObject
+                ProviderConfig(
+                    providers = root["providers"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
+                    providerUrls = root["provider_urls"]?.jsonObject?.mapValues { it.value.jsonPrimitive.content } ?: emptyMap()
+                )
+            } catch (e: Exception) {
+                // 如果获取失败，返回默认值（与 lib.rs 一致）
+                ProviderConfig(
+                    providers = listOf("SiliconFlow", "OpenRouter", "DeepSeek", "Custom"),
+                    providerUrls = mapOf(
+                        "SiliconFlow" to "https://api.siliconflow.cn",
+                        "OpenRouter" to "https://openrouter.ai/api",
+                        "DeepSeek" to "https://api.deepseek.com",
+                        "Custom" to ""
+                    )
+                )
+            }
+        }
+    }
 
     /**
-     * 获取默认 API 地址
-     * 地址定义在 lib.rs 的 providers.rs 中，通过 nativeGetProviderBaseUrl() 获取
+     * 根据供应商名称获取默认 API 地址
      */
-    val defaultBaseUrl: String
-        get() = nativeGetProviderBaseUrl(this.name)
-
-    companion object {
-        init {
-            System.loadLibrary("ai_chat_core")
-        }
-        
-        /**
-         * 从 lib.rs 获取供应商 API 地址
-         */
-        @JvmStatic
-        external fun nativeGetProviderBaseUrl(providerName: String): String
+    fun getBaseUrl(providerName: String): String {
+        return providerUrls[providerName] ?: ""
     }
 }
 
@@ -445,6 +475,15 @@ class ProviderManager(context: Context) {
         const val KEY_API_KEY = "api_key"
         const val KEY_BASE_URL = "base_url"
         const val KEY_MODEL = "model"
+
+        // 缓存供应商配置
+        private var providerConfig: ProviderConfig? = null
+        fun getProviderConfig(): ProviderConfig {
+            if (providerConfig == null) {
+                providerConfig = ProviderConfig.load()
+            }
+            return providerConfig!!
+        }
     }
 
     val availableProviders = listOf(
@@ -465,7 +504,7 @@ class ProviderManager(context: Context) {
     var baseUrl: String
         get() {
             val custom = prefs.getString(KEY_BASE_URL, "") ?: ""
-            return custom.ifEmpty { currentProvider.defaultBaseUrl }
+            return custom.ifEmpty { getProviderConfig().getBaseUrl(currentProvider.name) }
         }
         set(value) = prefs.edit().putString(KEY_BASE_URL, value).apply()
 
@@ -479,8 +518,7 @@ class ProviderManager(context: Context) {
     }
 
     fun getProviderBaseUrl(provider: LLMProvider): String {
-        // 从 lib.rs 获取，不再硬编码
-        return LLMProvider.nativeGetProviderBaseUrl(provider.name)
+        return getProviderConfig().getBaseUrl(provider.name)
     }
 
     fun getClient(): ProviderClient {
