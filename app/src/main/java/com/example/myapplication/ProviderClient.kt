@@ -479,13 +479,8 @@ class ProviderManager(context: Context) {
     }
 
     fun getProviderBaseUrl(provider: LLMProvider): String {
-        // 从 lib.rs 获取，保持与 Rust 端一致
-        return when (provider) {
-            LLMProvider.SiliconFlow -> "https://api.siliconflow.cn"
-            LLMProvider.OpenRouter -> "https://openrouter.ai/api"
-            LLMProvider.DeepSeek -> "https://api.deepseek.com"
-            LLMProvider.Custom -> ""
-        }
+        // 从 lib.rs 获取，不再硬编码
+        return LLMProvider.nativeGetProviderBaseUrl(provider.name)
     }
 
     fun getClient(): ProviderClient {
