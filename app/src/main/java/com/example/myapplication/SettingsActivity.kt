@@ -84,7 +84,7 @@ class SettingsActivity : AppCompatActivity() {
             )
             adapter = ArrayAdapter(this@SettingsActivity,
                 android.R.layout.simple_spinner_dropdown_item,
-                arrayOf("硅基流动", "OpenRouter", "DeepSeek", "OpenAI", "自定义"))
+                arrayOf("硅基流动", "OpenRouter", "DeepSeek", "自定义"))
             setOnItemSelectedListener(object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                     val provider = providerManager?.availableProviders?.getOrNull(position)

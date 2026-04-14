@@ -148,11 +148,6 @@ enum class LLMProvider(
         defaultBaseUrl = "https://api.deepseek.com",
         chatPath = "/v1/chat/completions"
     ),
-    OpenAI(
-        displayName = "OpenAI",
-        defaultBaseUrl = "https://api.openai.com",
-        chatPath = "/v1/chat/completions"
-    ),
     Custom(
         displayName = "自定义",
         defaultBaseUrl = "",
@@ -454,7 +449,6 @@ class ProviderManager(context: Context) {
         LLMProvider.SiliconFlow,
         LLMProvider.OpenRouter,
         LLMProvider.DeepSeek,
-        LLMProvider.OpenAI,
         LLMProvider.Custom
     )
 
@@ -482,7 +476,6 @@ class ProviderManager(context: Context) {
             LLMProvider.SiliconFlow -> "Qwen/Qwen2.5-7B-Instruct"
             LLMProvider.OpenRouter -> "openai/gpt-4o"
             LLMProvider.DeepSeek -> "deepseek-chat"
-            LLMProvider.OpenAI -> "gpt-4o"
             LLMProvider.Custom -> ""
         }
     }
