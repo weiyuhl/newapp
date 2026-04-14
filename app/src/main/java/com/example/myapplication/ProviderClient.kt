@@ -473,9 +473,9 @@ class ProviderManager(context: Context) {
 
     fun getDefaultModel(provider: LLMProvider): String {
         return when (provider) {
-            LLMProvider.SiliconFlow -> "Qwen/Qwen2.5-7B-Instruct"
-            LLMProvider.OpenRouter -> "openai/gpt-4o"
-            LLMProvider.DeepSeek -> "deepseek-chat"
+            LLMProvider.SiliconFlow -> ""
+            LLMProvider.OpenRouter -> ""
+            LLMProvider.DeepSeek -> ""
             LLMProvider.Custom -> ""
         }
     }

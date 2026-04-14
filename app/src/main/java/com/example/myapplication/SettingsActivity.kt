@@ -89,7 +89,7 @@ class SettingsActivity : AppCompatActivity() {
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                     val provider = providerManager?.availableProviders?.getOrNull(position)
                         ?: LLMProvider.SiliconFlow
-                    baseUrlEdit.hint = provider.defaultBaseUrl.ifEmpty { "https://your-api.com" }
+                    baseUrlEdit.hint = provider.defaultBaseUrl
                     // 清空已获取的模型列表
                     fetchedModels = emptyList()
                     updateModelSpinner()
@@ -109,7 +109,7 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         baseUrlEdit = EditText(this).apply {
-            hint = "https://api.siliconflow.cn"
+            hint = LLMProvider.SiliconFlow.defaultBaseUrl
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -305,12 +305,17 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun updateModelSpinner() {
         if (fetchedModels.isEmpty()) {
-            // 显示默认模型
-            val defaultModel = providerManager?.let { pm ->
-                pm.availableProviders.getOrNull(providerSpinner.selectedItemPosition)?.let { p ->
-                    pm.getDefaultModel(p)
-                }
-            } ?: ""
+            // 显示默认模型（从 Rust lib.rs 获取）
+            val defaultModel = try {
+                val client = AiChatClient("", "", "", 0, 0f)
+                val json = client.nativeGetDefaultConfig()
+                client.close()
+                val obj = kotlinx.serialization.json.Json.parseToJsonElement(json).jsonObject
+                obj["model"]?.jsonPrimitive?.contentOrNull ?: ""
+            } catch (e: Exception) {
+                ""
+            }
+            
             val items = if (defaultModel.isNotEmpty()) arrayOf(defaultModel) else arrayOf("请先获取模型列表")
             modelSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, items)
             if (defaultModel.isNotEmpty()) {

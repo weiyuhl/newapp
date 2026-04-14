@@ -62,6 +62,18 @@ class AiChatClient(
         }
     }
 
+    /**
+     * 获取默认配置（从 Rust lib.rs）
+     * @return JSON 字符串，包含 api_url, model, max_tokens, temperature
+     */
+    external fun nativeGetDefaultConfig(): String
+
+    companion object {
+        init {
+            System.loadLibrary("ai_chat_core")
+        }
+    }
+
     // ===== JNI Native Methods =====
 
     private external fun nativeCreate(
