@@ -89,7 +89,19 @@ class SettingsActivity : AppCompatActivity() {
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                     val provider = providerManager?.availableProviders?.getOrNull(position)
                         ?: LLMProvider.SiliconFlow
-                    baseUrlEdit.hint = ProviderManager.getProviderConfig().getBaseUrl(provider.name)
+                    
+                    val config = ProviderManager.getProviderConfig()
+                    val defaultUrl = config.getBaseUrl(provider.name)
+                    
+                    // 更新 hint 和文本
+                    baseUrlEdit.hint = defaultUrl
+                    
+                    // 如果当前输入框为空或是默认值，则更新为新的默认 URL
+                    val currentText = baseUrlEdit.text.toString()
+                    if (currentText.isEmpty() || prefs.getString("base_url", "")?.isEmpty() != false) {
+                        baseUrlEdit.setText(defaultUrl)
+                    }
+                    
                     // 清空已获取的模型列表
                     fetchedModels = emptyList()
                     updateModelSpinner()
@@ -292,7 +304,15 @@ class SettingsActivity : AppCompatActivity() {
         val provider = providerManager?.currentProvider ?: LLMProvider.SiliconFlow
         val providerIndex = providerManager?.availableProviders?.indexOf(provider) ?: 0
         providerSpinner.setSelection(providerIndex.coerceAtMost(providerManager?.availableProviders?.size?.minus(1) ?: 0))
-        baseUrlEdit.setText(providerManager?.baseUrl ?: "")
+        
+        val config = ProviderManager.getProviderConfig()
+        val defaultUrl = config.getBaseUrl(provider.name)
+        
+        // 加载保存的 URL 或使用默认 URL
+        val savedUrl = prefs.getString("base_url", "") ?: ""
+        baseUrlEdit.setText(savedUrl.ifEmpty { defaultUrl })
+        baseUrlEdit.hint = defaultUrl
+        
         apiKeyEdit.setText(providerManager?.apiKey ?: "")
 
         updateModelSpinner()
@@ -445,17 +465,17 @@ class SettingsActivity : AppCompatActivity() {
                 )
             } catch (e: Exception) {
                 errorMsg = "创建客户端失败: ${e.message}"
-                android.util.Log.e("FetchModels", "create client error", e)
+                
                 null
             }
 
             if (client != null) {
                 try {
                     models = client.listModels()
-                    android.util.Log.d("FetchModels", "Got ${models.size} models")
+                    
                 } catch (e: Exception) {
                     errorMsg = e.message ?: "未知错误"
-                    android.util.Log.e("FetchModels", "listModels error: $errorMsg", e)
+                    
                 }
                 try { client.close() } catch (_: Exception) {}
             }
@@ -501,7 +521,7 @@ class SettingsActivity : AppCompatActivity() {
                     baseUrl = baseUrl
                 )
             } catch (e: Exception) {
-                android.util.Log.e("Balance", "create client error", e)
+                
                 withContext(Dispatchers.Main) {
                     balanceText.text = "创建客户端失败: ${e.message}"
                     balanceText.setTextColor(0xFFFF0000.toInt())
@@ -552,7 +572,7 @@ class SettingsActivity : AppCompatActivity() {
                                     "总额度: $${String.format("%.2f", limit)}\n" +
                                     "剩余额度: $${String.format("%.2f", limitRemaining)}\n" +
                                     "免费用户: ${if (isFreeTier) "是" else "否"}"
-                                android.util.Log.d("Balance", "OpenRouter balance: $balanceInfo")
+                                
                             } else {
                                 balanceInfo = "未获取到密钥信息"
                             }
@@ -566,7 +586,7 @@ class SettingsActivity : AppCompatActivity() {
                 }
                 isSuccess = true
             } catch (e: Exception) {
-                android.util.Log.e("Balance", "query error", e)
+                
                 balanceInfo = "查询失败: ${e.message}"
                 isSuccess = false
             } finally {

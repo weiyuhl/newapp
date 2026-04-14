@@ -160,9 +160,12 @@ data class ProviderConfig(
                 client.close()
                 val root = kotlinx.serialization.json.Json.parseToJsonElement(json)
                     .jsonObject
+                val providerUrls = root["provider_urls"]?.jsonObject?.mapValues { 
+                    it.value.jsonPrimitive.content 
+                } ?: emptyMap()
                 ProviderConfig(
                     providers = root["providers"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList(),
-                    providerUrls = root["provider_urls"]?.jsonObject?.mapValues { it.value.jsonPrimitive.content } ?: emptyMap()
+                    providerUrls = providerUrls
                 )
             } catch (e: Exception) {
                 // 如果获取失败，返回默认值（与 lib.rs 一致）
@@ -483,6 +486,10 @@ class ProviderManager(context: Context) {
                 providerConfig = ProviderConfig.load()
             }
             return providerConfig!!
+        }
+        
+        fun refreshProviderConfig() {
+            providerConfig = ProviderConfig.load()
         }
     }
 
